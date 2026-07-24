@@ -1,0 +1,3 @@
+# Reference build is standard-library only — no third-party dependencies.
+# Production targets (see README): fastapi, uvicorn, psycopg[binary], stripe,
+# easypost, twilio, anthropic, sentry-sdk.
