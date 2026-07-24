@@ -15,6 +15,7 @@ show the ledger/core driving real HTTP endpoints with no framework:
     POST /inbound   {"recipient_hint","carrier","tracking","weight_lb","location"}
 """
 import json
+import os
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
@@ -24,7 +25,13 @@ from porterly.core import Core, Rejected
 from porterly.fsm import InvalidTransition
 from porterly.ledger import EventStore
 
-STORE = EventStore()
+# Config from the environment (12-factor). Defaults keep the local demo unchanged:
+# localhost, in-memory. A deployment can override to bind the LAN and persist to a file.
+HOST = os.environ.get("PORTERLY_HOST", "127.0.0.1")
+PORT = int(os.environ.get("PORTERLY_PORT", "8787"))
+DB = os.environ.get("PORTERLY_DB", ":memory:")   # a file path persists across restarts
+
+STORE = EventStore(DB)
 CORE = Core(STORE)
 
 
@@ -53,12 +60,14 @@ def inbound(recipient_hint, carrier="UPS", tracking=None, weight_lb=5.0,
     return projections.parcel_state(STORE, pid)
 
 
-# seed a couple so the endpoints show data immediately
-for _hint, _loc in [("Sarah Chen", "TSC · MR Cage · C1"), ("Acme", "TSC · BC Cage · A2")]:
-    try:
-        inbound(_hint, location=_loc)
-    except (Rejected, InvalidTransition):
-        pass
+# seed a couple so the endpoints show data immediately — only into an EMPTY store, so a
+# persisted (file-backed) deployment isn't re-seeded on every restart. Disable with PORTERLY_SEED=0.
+if os.environ.get("PORTERLY_SEED", "1") == "1" and STORE.count() == 0:
+    for _hint, _loc in [("Sarah Chen", "TSC · MR Cage · C1"), ("Acme", "TSC · BC Cage · A2")]:
+        try:
+            inbound(_hint, location=_loc)
+        except (Rejected, InvalidTransition):
+            pass
 
 
 class H(BaseHTTPRequestHandler):
@@ -126,5 +135,5 @@ class H(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print("Porterly reference service on http://127.0.0.1:8787  (Ctrl-C to stop)")
-    ThreadingHTTPServer(("127.0.0.1", 8787), H).serve_forever()
+    print("Porterly reference service on http://%s:%d  (db=%s, Ctrl-C to stop)" % (HOST, PORT, DB))
+    ThreadingHTTPServer((HOST, PORT), H).serve_forever()
