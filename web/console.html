@@ -1,0 +1,79 @@
+<!doctype html><html lang=en><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<title>Porterly Future · Console</title>
+<style>
+ :root{--paper:#f6f3ec;--ink:#1c1a17;--muted:#8a7f6a;--brass:#9a6a2b;--line:#d8d0be;--card:#fffdf7;color-scheme:light dark}
+ @media(prefers-color-scheme:dark){:root{--paper:#17150f;--ink:#ece7dd;--muted:#9a9083;--brass:#c79a5a;--line:#3a3428;--card:#201d16}}
+ *{box-sizing:border-box}
+ body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.5 ui-sans-serif,system-ui,-apple-system,sans-serif}
+ header{padding:1.1rem 1.5rem .6rem;border-bottom:1px solid var(--line)}
+ h1{margin:0;font:600 1.35rem/1.1 ui-serif,Georgia,serif}
+ nav{display:flex;gap:1rem;margin-top:.5rem;font-size:.9rem}
+ nav a{color:var(--brass);text-decoration:none} nav a[aria-current]{font-weight:700;border-bottom:2px solid var(--brass)}
+ main{max-width:72rem;margin:0 auto;padding:1.25rem 1.5rem 3rem}
+ .bar{display:flex;justify-content:space-between;align-items:center;margin:.2rem 0 .6rem}
+ h2{font:600 .82rem/1 ui-serif,Georgia,serif;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin:0}
+ .band{display:grid;grid-template-columns:repeat(auto-fit,minmax(10rem,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:.7rem;overflow:hidden;margin-bottom:1.6rem}
+ .band>div{background:var(--card);padding:.9rem 1.1rem}
+ .band .k{font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+ .band .v{font:600 1.55rem/1.1 ui-serif,Georgia,serif;font-variant-numeric:tabular-nums;margin-top:.15rem}
+ .band .s{font-size:.75rem;color:var(--muted)}
+ .cols{display:grid;grid-template-columns:1.5fr 1fr;gap:1.6rem}@media(max-width:46rem){.cols{grid-template-columns:1fr}}
+ table{width:100%;border-collapse:collapse;font-size:.86rem}
+ th,td{text-align:left;padding:.45rem .5rem;border-bottom:1px solid var(--line);vertical-align:middle}
+ th{font-size:.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+ .chip{display:inline-block;padding:.1rem .5rem;border-radius:1rem;font-size:.66rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em}
+ input{font:inherit;padding:.5rem .7rem;border:1px solid var(--line);border-radius:.5rem;background:var(--card);color:var(--ink);width:13rem}
+ button{font:inherit;padding:.42rem .8rem;border:1px solid var(--line);border-radius:.5rem;background:var(--card);color:var(--brass);cursor:pointer}
+ .bucket{padding:.5rem 0;border-bottom:1px solid var(--line)} .bucket .loc{font-weight:600}
+ .mono{font-family:ui-monospace,Menlo,monospace;font-size:.8em;color:var(--muted)}
+ a.gl{color:var(--brass);text-decoration:none;font-weight:600} a.gl:hover{text-decoration:underline}
+</style>
+<header>
+  <h1>Porterly&nbsp;Future · Console</h1>
+  <nav><a href="/dock">Dock</a><a href="/console" aria-current=page>Console</a><a href="/">API</a></nav>
+</header>
+<main>
+  <div class=bar><h2>Settled statement — replaces the monthly meeting</h2><button onclick=refresh()>↻ refresh</button></div>
+  <div class=band id=recon></div>
+  <div class=cols>
+    <section>
+      <div class=bar><h2>Parcels</h2><input id=q placeholder="find a package…" oninput=find()></div>
+      <table><thead><tr><th>Recipient</th><th>Kind</th><th>State</th><th>Location</th><th></th></tr></thead>
+      <tbody id=rows></tbody></table>
+    </section>
+    <section>
+      <h2>Storage twin</h2><div id=storage style=margin-top:.5rem></div>
+    </section>
+  </div>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+const CHIP={stored:'#3b6ea5',awaiting_consent:'#8a6d1f',consented:'#4a7d4a',released:'#5a5a5a',shipped:'#2f7d5b',closed:'#8a7f6a',disputed:'#b5791f',drift:'#b5791f',theft_review:'#c0662e',lost:'#b23b3b',abandoned:'#7a7a7a',arrived:'#8a7f6a',captured:'#8a7f6a',identified:'#4a7d4a'};
+const chip=s=>{const c=CHIP[s]||'#8a7f6a';return `<span class=chip style="background:${c}22;color:${c};border:1px solid ${c}55">${s||'?'}</span>`};
+const money=n=>'$'+(Number(n)||0).toFixed(2);
+async function refresh(){
+  try{
+    const r=await (await fetch('/reconcile')).json();
+    $('recon').innerHTML=[
+      ['Customers paid',money(r.paid_by_customers),'net of covered disputes'],
+      ['Hotel covered',money(r.hotel_covered),r.hotel_covered_cases+' case(s)'],
+      ['Porterly absorbed',money(r.porterly_absorbed),''],
+    ].map(([k,v,s])=>`<div><div class=k>${k}</div><div class=v>${v}</div><div class=s>${s}</div></div>`).join('');
+    const st=await (await fetch('/storage')).json();
+    const keys=Object.keys(st);
+    $('storage').innerHTML=keys.length?keys.map(loc=>`<div class=bucket><div class=loc>${loc} <span class=mono>×${st[loc].length}</span></div><div class=mono>${st[loc].join(', ')}</div></div>`).join(''):'<div class=mono>nothing on the shelves</div>';
+    find();
+  }catch(e){}
+}
+async function find(){
+  const q=$('q').value.trim();
+  const list=await (await fetch(q?'/find?q='+encodeURIComponent(q):'/parcels')).json();
+  $('rows').innerHTML=list.map(p=>{
+    const gl=p.state==='awaiting_consent'?`<a class=gl href="/g/${p.parcel_id}" target=_blank>guest link →</a>`:'';
+    return `<tr><td>${p.recipient||'—'}<div class=mono>${p.parcel_id}</div></td><td>${p.kind||''}</td><td>${chip(p.state)}</td><td class=mono>${p.location||''}</td><td>${gl}</td></tr>`;
+  }).join('')||'<tr><td colspan=5 class=mono>no matches</td></tr>';
+}
+refresh(); setInterval(refresh,5000);
+</script>
+</html>

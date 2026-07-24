@@ -1,0 +1,74 @@
+<!doctype html><html lang=en><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<title>A package for you · Porterly</title>
+<style>
+ :root{--paper:#efe9dd;--ink:#1c1a17;--muted:#8a7f6a;--brass:#9a6a2b;--line:#d8d0be;--bubble:#fffdf7;--me:#e9dcc4;color-scheme:light dark}
+ @media(prefers-color-scheme:dark){:root{--paper:#12100b;--ink:#ece7dd;--muted:#9a9083;--brass:#c79a5a;--line:#3a3428;--bubble:#201d16;--me:#2e2718}}
+ *{box-sizing:border-box}
+ body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+   display:flex;flex-direction:column;min-height:100vh}
+ header{padding:.9rem 1.1rem;border-bottom:1px solid var(--line);text-align:center}
+ header b{font:600 1.05rem/1 ui-serif,Georgia,serif} header .s{display:block;color:var(--muted);font-size:.74rem;margin-top:.15rem;letter-spacing:.03em}
+ main{flex:1;width:100%;max-width:26rem;margin:0 auto;padding:1.2rem 1rem 1.6rem;display:flex;flex-direction:column;gap:.7rem}
+ .msg{align-self:flex-start;max-width:88%;background:var(--bubble);border:1px solid var(--line);border-radius:1rem 1rem 1rem .25rem;padding:.7rem .9rem;box-shadow:0 1px 0 var(--line)}
+ .me{align-self:flex-end;background:var(--me);border:none;border-radius:1rem 1rem .25rem 1rem;color:var(--ink)}
+ .msg .who{font-size:.66rem;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:.2rem}
+ .choices{display:flex;flex-direction:column;gap:.55rem;margin-top:.4rem}
+ button{font:inherit;text-align:left;padding:.85rem 1rem;border:1px solid var(--line);border-radius:.7rem;background:var(--bubble);color:var(--ink);cursor:pointer;display:flex;justify-content:space-between;align-items:center}
+ button:active{transform:translateY(1px)} button .p{font-weight:700;color:var(--brass)}
+ button.free .p{color:#2f7d5b}
+ .fine{color:var(--muted);font-size:.76rem;text-align:center;margin-top:.3rem}
+ .done{align-self:center;text-align:center;color:var(--muted);font-size:.8rem;margin-top:.2rem}
+</style>
+<header><b>The Front Desk</b><span class=s>Concierge · Porterly</span></header>
+<main id=thread><div class=msg><div class=who>Front Desk</div>One moment…</div></main>
+<script>
+const pid=location.pathname.split('/')[2]||'';
+const thread=document.getElementById('thread');
+const money=n=>Number(n)===0?'free':'$'+Number(n).toFixed(2);
+function bubble(text,me){const d=document.createElement('div');d.className='msg'+(me?' me':'');d.innerHTML=(me?'':'<div class=who>Front Desk</div>')+text;thread.appendChild(d);return d;}
+function clear(){thread.innerHTML='';}
+async function load(){
+  clear();
+  let d; try{ d=await (await fetch('/guest?id='+encodeURIComponent(pid))).json(); }
+  catch(e){ bubble('Sorry — we couldn’t reach the desk just now.'); return; }
+  if(!d.found){ bubble('We couldn’t find that package. Please check with the front desk.'); return; }
+  const name=d.first_name&&d.first_name!=='you'?d.first_name:'there';
+  if(d.awaiting){
+    bubble(`Hi ${name} — a package just arrived for you at the front desk. How would you like it handled?`);
+    const box=document.createElement('div');box.className='choices';
+    d.options.forEach(o=>{
+      const b=document.createElement('button');
+      if(o.price===0)b.className='free';
+      b.innerHTML=`<span>${o.label}</span><span class=p>${money(o.price)}</span>`;
+      b.onclick=()=>choose(o);
+      box.appendChild(b);
+    });
+    thread.appendChild(box);
+    const f=document.createElement('div');f.className='fine';f.textContent='No surprises — you only pay for what you pick.';thread.appendChild(f);
+  } else {
+    outcome(d);
+  }
+}
+function outcome(d){
+  const paid=(d.charges||[]).filter(c=>c.amount).reduce((a,c)=>a+c.amount,0);
+  let line;
+  if(d.state==='closed'||d.state==='released'){
+    line = paid>0 ? `You’re all set — it’ll be brought to your room. $${paid.toFixed(2)} added to your folio.`
+                  : `You’re all set — it’ll be waiting at the front desk, no charge.`;
+  } else { line = `This package has already been handled. Thanks!`; }
+  bubble(line);
+  const done=document.createElement('div');done.className='done';done.textContent='— handled by Porterly';thread.appendChild(done);
+}
+async function choose(o){
+  bubble(o.label+' — '+money(o.price), true);
+  try{
+    const res=await fetch('/guest/consent',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:pid,choice:o.key})});
+    const d=await res.json();
+    if(res.ok) setTimeout(()=>outcome(d),350);
+    else bubble(d.rejected||d.error||'Sorry, something went wrong.');
+  }catch(e){ bubble('Sorry, we couldn’t confirm that just now.'); }
+}
+load();
+</script>
+</html>

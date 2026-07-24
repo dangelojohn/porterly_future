@@ -1,0 +1,89 @@
+<!doctype html><html lang=en><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<title>Porterly Future · Dock</title>
+<style>
+ :root{--paper:#f6f3ec;--ink:#1c1a17;--muted:#8a7f6a;--brass:#9a6a2b;--line:#d8d0be;--card:#fffdf7;color-scheme:light dark}
+ @media(prefers-color-scheme:dark){:root{--paper:#17150f;--ink:#ece7dd;--muted:#9a9083;--brass:#c79a5a;--line:#3a3428;--card:#201d16}}
+ *{box-sizing:border-box}
+ body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+ header{padding:1.1rem 1.25rem .6rem;border-bottom:1px solid var(--line)}
+ h1{margin:0;font:600 1.35rem/1.1 ui-serif,Georgia,serif;letter-spacing:.01em}
+ .tag{color:var(--muted);font-size:.82rem;font-family:ui-serif,Georgia,serif;font-style:italic}
+ nav{display:flex;gap:1rem;margin-top:.5rem;font-size:.9rem}
+ nav a{color:var(--brass);text-decoration:none} nav a[aria-current]{font-weight:700;border-bottom:2px solid var(--brass)}
+ main{max-width:34rem;margin:0 auto;padding:1.1rem 1.25rem 3rem}
+ label{display:block;font-size:.72rem;color:var(--muted);margin:.9rem 0 .25rem;text-transform:uppercase;letter-spacing:.07em}
+ input,select,button{font:inherit;width:100%;padding:.7rem .8rem;border:1px solid var(--line);border-radius:.5rem;background:var(--card);color:var(--ink)}
+ input:focus,select:focus{outline:2px solid var(--brass);outline-offset:1px}
+ .row{display:flex;gap:.7rem}.row>div{flex:1}
+ button.go{margin-top:1.4rem;background:var(--brass);color:#fff;border:none;font-weight:600;cursor:pointer;letter-spacing:.02em}
+ button.go:active{transform:translateY(1px)}
+ .card{margin-top:1.3rem;background:var(--card);border:1px solid var(--line);border-radius:.7rem;padding:1rem 1.1rem}
+ .ok{border-left:3px solid var(--brass)} .err{border-left:3px solid #c0662e}
+ .chip{display:inline-block;padding:.12rem .55rem;border-radius:1rem;font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
+ .k{color:var(--muted);font-size:.72rem;text-transform:uppercase;letter-spacing:.06em}
+ .big{font:600 1.2rem/1.2 ui-serif,Georgia,serif;margin:.15rem 0 .3rem}
+ .mono{font-family:ui-monospace,Menlo,monospace;font-size:.82em;color:var(--muted)}
+ .trail{margin-top:.7rem;border-top:1px dashed var(--line);padding-top:.5rem}
+ .trail div{display:flex;justify-content:space-between;color:var(--muted);font-size:.82rem;padding:.08rem 0}
+ .recent{margin-top:1.8rem} .recent h2{font:600 .8rem/1 ui-serif,Georgia,serif;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+ .ritem{display:flex;justify-content:space-between;align-items:center;padding:.5rem 0;border-bottom:1px solid var(--line);font-size:.9rem}
+</style>
+<header>
+  <h1>Porterly&nbsp;Future · Dock</h1>
+  <div class=tag>Inbound capture — the Input app</div>
+  <nav><a href="/dock" aria-current=page>Dock</a><a href="/console">Console</a><a href="/">API</a></nav>
+</header>
+<main>
+  <form id=f>
+    <label for=hint>Recipient</label>
+    <input id=hint placeholder="guest name, room #, or exhibitor" autocomplete=off required>
+    <div class=row>
+      <div><label for=carrier>Carrier</label>
+        <select id=carrier><option>UPS</option><option>FedEx</option><option>USPS</option><option>DHL</option><option>LTL</option></select></div>
+      <div><label for=weight>Weight (lb)</label><input id=weight type=number step=0.1 min=0.1 value=5></div>
+    </div>
+    <label for=tracking>Tracking <span style="text-transform:none">(optional)</span></label>
+    <input id=tracking placeholder="auto-assigned if blank" autocomplete=off>
+    <label for=loc>Shelf location</label>
+    <select id=loc>
+      <option>TSC · MR Cage · C1</option><option>TSC · MR Cage · C2</option>
+      <option>TSC · BC Cage · A1</option><option>TSC · BC Cage · A2</option>
+      <option>TSC · Floor · P1</option><option>TSC · Mailroom · Bin 3</option>
+    </select>
+    <button class=go type=submit>Capture parcel</button>
+  </form>
+  <div id=out></div>
+  <div class=recent><h2>Recent captures</h2><div id=recent></div></div>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+const CHIP={stored:'#3b6ea5',awaiting_consent:'#8a6d1f',consented:'#4a7d4a',released:'#5a5a5a',shipped:'#2f7d5b',closed:'#8a7f6a',disputed:'#b5791f',drift:'#b5791f',theft_review:'#c0662e',lost:'#b23b3b',abandoned:'#7a7a7a',arrived:'#8a7f6a',captured:'#8a7f6a',identified:'#4a7d4a'};
+const chip=s=>{const c=CHIP[s]||'#8a7f6a';return `<span class=chip style="background:${c}22;color:${c};border:1px solid ${c}55">${s||'?'}</span>`};
+function render(p){
+  const cust=(p.custody||[]).map(c=>`<div><span>${c.type}</span><span>${(c.ts||'').slice(11,16)} · ${c.actor}</span></div>`).join('');
+  $('out').innerHTML=`<div class="card ok">
+    <div class=k>captured & corroborated</div>
+    <div class=big>${p.recipient||'?'} ${p.kind?chip(p.kind):''}</div>
+    <div style="margin:.35rem 0">${chip(p.state)} <span class=mono>${p.parcel_id}</span></div>
+    <div class=k>${p.location||''}</div>
+    <div class=trail>${cust}</div></div>`;
+  const r=document.createElement('div');r.className='ritem';
+  r.innerHTML=`<span>${p.recipient||'?'} <span class=mono>${p.parcel_id}</span></span>${chip(p.state)}`;
+  $('recent').prepend(r);
+}
+function fail(msg){$('out').innerHTML=`<div class="card err"><div class=k>escalated — needs a human</div><div style="margin-top:.3rem">${msg}</div></div>`}
+$('f').addEventListener('submit',async e=>{
+  e.preventDefault();
+  const body={recipient_hint:$('hint').value.trim(),carrier:$('carrier').value,weight_lb:parseFloat($('weight').value)||1,location:$('loc').value};
+  const t=$('tracking').value.trim(); if(t)body.tracking=t;
+  try{
+    const res=await fetch('/inbound',{method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':(crypto.randomUUID?crypto.randomUUID():String(Math.random()))},body:JSON.stringify(body)});
+    const d=await res.json();
+    if(res.status===201){render(d);$('hint').value='';$('tracking').value='';$('hint').focus();}
+    else fail(d.rejected||d.error||('HTTP '+res.status));
+  }catch(err){fail(String(err))}
+});
+$('hint').focus();
+</script>
+</html>

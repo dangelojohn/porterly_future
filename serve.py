@@ -20,7 +20,7 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
-from porterly import agents, projections
+from porterly import agents, policy, projections
 from porterly.core import Core, Rejected
 from porterly.fsm import InvalidTransition
 from porterly.ledger import EventStore
@@ -57,6 +57,40 @@ def inbound(recipient_hint, carrier="UPS", tracking=None, weight_lb=5.0,
     CORE.condition_photo(pid, "api", base + ":cond", "s3://evidence/%s.jpg" % pid)
     CORE.apply_intent(agents.propose_identity(pid, {"recipient_hint": recipient_hint}), "api", base + ":id")
     CORE.store_at(pid, "api", base + ":store", location, "s3://shelf/%s.jpg" % pid)
+    # A guest is reached on their own phone (SMS in production): disclose the options so the
+    # parcel is awaiting the guest's consent and the guest link goes live.
+    if projections.parcel_state(STORE, pid).get("kind") == "guest":
+        CORE.disclose(pid, "api", base + ":disclose", ["pickup", "room"])
+    return projections.parcel_state(STORE, pid)
+
+
+def guest_view(pid):
+    """What the guest sees from their texted link — first name only, priced options from policy."""
+    st = projections.parcel_state(STORE, pid)
+    if not st.get("parcel_id"):
+        return {"found": False}
+    first = (st.get("recipient") or "").split(" ")[0] if st.get("recipient") else "you"
+    options = []
+    for key, label in (("pickup", "Pick it up at the front desk"), ("room", "Bring it to my room")):
+        amt, _ = policy.price_inbound(key)
+        options.append({"key": key, "label": label, "price": amt})
+    return {"found": True, "parcel_id": pid, "first_name": first, "state": st["state"],
+            "awaiting": st["state"] == "awaiting_consent", "options": options,
+            "charges": st.get("charges", [])}
+
+
+def guest_consent(pid, choice):
+    """The guest's reply -> the core records consent (policy price) and hands the parcel over.
+    Only the deterministic core moves money/state; the page just relays the choice."""
+    if choice not in ("pickup", "room"):
+        raise Rejected("please choose pick-up or room delivery")
+    if projections.parcel_state(STORE, pid)["state"] != "awaiting_consent":
+        raise Rejected("this package has already been handled")
+    base = _op()
+    if choice == "room":
+        CORE.consent(pid, "guest", base + ":consent", "room", "guest")   # $8 at the policy price
+    CORE.release(pid, "guest", base + ":release", "guest-app", choice=choice, payer="guest")
+    CORE.close(pid, "system", base + ":close")
     return projections.parcel_state(STORE, pid)
 
 
@@ -85,9 +119,20 @@ INDEX_HTML = """<!doctype html><html lang=en><meta charset=utf-8>
  ul{list-style:none;padding:0} li{padding:.35rem 0;border-bottom:1px solid #d8d0be55}
  .m{display:inline-block;min-width:3.3rem;font-weight:600;color:#9a6a2b}
  .note{margin-top:1.6rem;font-size:.86rem;color:#8a7f6a}
+ .apps{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin:0 0 1.8rem}
+ @media(max-width:34rem){.apps{grid-template-columns:1fr}}
+ .app{display:block;padding:1rem 1.15rem;background:#fffdf7;border:1px solid #d8d0be;border-left:3px solid #9a6a2b;border-radius:.6rem;text-decoration:none;color:inherit}
+ .app b{display:block;font:600 1.1rem/1 ui-serif,Georgia,serif;color:#9a6a2b}.app span{display:block;color:#8a7f6a;font-size:.84rem;margin-top:.25rem}
+ h2{font:600 .78rem/1 ui-serif,Georgia,serif;color:#8a7f6a;text-transform:uppercase;letter-spacing:.08em;margin:0 0 .5rem}
+ @media(prefers-color-scheme:dark){.app{background:#201d16;border-color:#3a3428}.app b{color:#c79a5a}.app span,.note,.sub,h2{color:#9a9083}a{color:#c79a5a}}
 </style>
 <h1>Porterly&nbsp;Future</h1>
 <p class=sub>Reference implementation of the AI-native architecture &mdash; not the live system.</p>
+<div class=apps>
+ <a class=app href="/dock"><b>Dock &rarr;</b><span>Inbound capture. Receive a parcel; watch the core corroborate &amp; shelve it.</span></a>
+ <a class=app href="/console"><b>Console &rarr;</b><span>Manager surface. Parcels, the storage twin &amp; the settled statement.</span></a>
+</div>
+<h2>Raw API</h2>
 <ul>
  <li><span class=m>GET</span> <a href="/health">/health</a> &mdash; service + event count</li>
  <li><span class=m>GET</span> <a href="/reconcile">/reconcile</a> &mdash; the settled statement</li>
@@ -99,6 +144,14 @@ INDEX_HTML = """<!doctype html><html lang=en><meta charset=utf-8>
 </ul>
 <p class=note>Perception proposes, the deterministic core corroborates and acts. Stdlib only; append-only ledger.</p>
 </html>"""
+
+WEB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
+PAGES = {"/dock": "dock.html", "/console": "console.html"}
+
+
+def _page(name):
+    with open(os.path.join(WEB, name), encoding="utf-8") as fh:
+        return fh.read()
 
 
 class H(BaseHTTPRequestHandler):
@@ -129,6 +182,12 @@ class H(BaseHTTPRequestHandler):
         try:
             if u.path in ("/", ""):
                 return self._send_html(200, INDEX_HTML)
+            if u.path in PAGES:
+                return self._send_html(200, _page(PAGES[u.path]))
+            if u.path.startswith("/g/"):
+                return self._send_html(200, _page("guest.html"))
+            if u.path == "/guest":
+                return self._send(200, guest_view(q.get("id", [""])[0]))
             if u.path == "/favicon.ico":
                 return self._send(404, {"error": "no favicon"})
             if u.path == "/health":
@@ -174,6 +233,15 @@ class H(BaseHTTPRequestHandler):
                 return self._send(400, {"error": "unexpected or missing request field"})
             except Exception:
                 return self._send(500, {"error": "internal error"})   # never leak internals
+        if u.path == "/guest/consent":
+            try:
+                return self._send(200, guest_consent(body.get("id", ""), body.get("choice", "")))
+            except Rejected as e:
+                return self._send(422, {"rejected": str(e)})
+            except (InvalidTransition, ValueError) as e:
+                return self._send(400, {"error": str(e)})
+            except Exception:
+                return self._send(500, {"error": "internal error"})
         return self._send(404, {"error": "not found"})
 
 
