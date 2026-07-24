@@ -70,6 +70,37 @@ if os.environ.get("PORTERLY_SEED", "1") == "1" and STORE.count() == 0:
             pass
 
 
+INDEX_HTML = """<!doctype html><html lang=en><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<title>Porterly Future — reference service</title>
+<style>
+ :root{color-scheme:light dark}
+ body{max-width:44rem;margin:3rem auto;padding:0 1.25rem;
+   font:16px/1.6 ui-serif,Georgia,"Times New Roman",serif;color:#1c1a17;background:#f6f3ec}
+ @media(prefers-color-scheme:dark){body{color:#ece7dd;background:#17150f}}
+ h1{font-size:1.9rem;margin:.2rem 0 .1rem;letter-spacing:.01em}
+ .sub{color:#8a7f6a;margin:0 0 1.6rem;font-style:italic}
+ a{color:#9a6a2b;text-decoration:none} a:hover{text-decoration:underline}
+ code{font-family:ui-monospace,Menlo,monospace;font-size:.92em}
+ ul{list-style:none;padding:0} li{padding:.35rem 0;border-bottom:1px solid #d8d0be55}
+ .m{display:inline-block;min-width:3.3rem;font-weight:600;color:#9a6a2b}
+ .note{margin-top:1.6rem;font-size:.86rem;color:#8a7f6a}
+</style>
+<h1>Porterly&nbsp;Future</h1>
+<p class=sub>Reference implementation of the AI-native architecture &mdash; not the live system.</p>
+<ul>
+ <li><span class=m>GET</span> <a href="/health">/health</a> &mdash; service + event count</li>
+ <li><span class=m>GET</span> <a href="/reconcile">/reconcile</a> &mdash; the settled statement</li>
+ <li><span class=m>GET</span> <a href="/parcels">/parcels</a> &mdash; every parcel's state</li>
+ <li><span class=m>GET</span> <a href="/storage">/storage</a> &mdash; the shelf digital twin</li>
+ <li><span class=m>GET</span> <a href="/find?q=Sarah">/find?q=&hellip;</a> &mdash; find a package</li>
+ <li><span class=m>GET</span> <code>/parcel?id=PR-&hellip;</code> &mdash; one parcel + custody chain</li>
+ <li><span class=m>POST</span> <code>/inbound {"recipient_hint":"&hellip;"}</code> &mdash; receive a parcel (optional <code>Idempotency-Key</code> header)</li>
+</ul>
+<p class=note>Perception proposes, the deterministic core corroborates and acts. Stdlib only; append-only ledger.</p>
+</html>"""
+
+
 class H(BaseHTTPRequestHandler):
     timeout = 15   # socket timeout — a stalled/slow-loris connection can't hold a thread forever
 
@@ -81,6 +112,14 @@ class H(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _send_html(self, code, html):
+        body = html.encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def log_message(self, *a):
         pass
 
@@ -88,6 +127,10 @@ class H(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         q = parse_qs(u.query)
         try:
+            if u.path in ("/", ""):
+                return self._send_html(200, INDEX_HTML)
+            if u.path == "/favicon.ico":
+                return self._send(404, {"error": "no favicon"})
             if u.path == "/health":
                 return self._send(200, {"ok": True, "events": STORE.count(),
                                         "states": [p["state"] for p in projections.all_parcels(STORE)]})
